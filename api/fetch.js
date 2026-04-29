@@ -5,40 +5,50 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     if (req.method === 'OPTIONS') return res.status(200).end();
-
+    
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'No URL' });
 
-    const SB_KEY = "HEPV5Z6E0VC66R4GI78UN8AOH78ZJ9O82B7DUUOJ49ALZT5CT8NVUU17FAZCZ8H3TVPBUL8W5YLT57WS";
-
     try {
-        // ULTRA-LEAN SETTINGS:
-        // 1. Removed premium_proxy (saves ~5 seconds)
-        // 2. Kept stealth_proxy (still bypasses most blocks)
-        // 3. render_js remains false
-        const scraperUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SB_KEY}&url=${encodeURIComponent(url)}&stealth_proxy=true`;
-
-        // Setting a slightly shorter timeout to ensure we fail gracefully before Vercel kills us
-        const response = await axios.get(scraperUrl, { timeout: 8500 }); 
+        // Determine if it's JunkMail to set the specific referer
+        const isJunkMail = url.includes('junkmail.co.za');
+        
+        const response = await axios.get(url, { 
+            timeout: 8000, // Increased timeout for JunkMail's slower response
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': isJunkMail ? 'https://www.junkmail.co.za/' : 'https://www.google.com/',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'cross-site',
+                'Upgrade-Insecure-Requests': '1'
+            } 
+        });
 
         const $ = cheerio.load(response.data);
         
-        // Grab title from OG tags first, then H1
+        // Refined selectors for better accuracy
         const title = $('meta[property="og:title"]').attr('content') || 
                       $('h1').first().text().trim() || 
                       "Item Found";
                       
-        const image = $('meta[property="og:image"]').attr('content') || "";
+        const image = $('meta[property="og:image"]').attr('content') || 
+                      $('meta[name="twitter:image"]').attr('content') || "";
 
         return res.status(200).json({ success: true, title, image });
 
     } catch (e) {
-        console.error('Final Speed Attempt Error:', e.message);
-        // If it's still too slow, trigger the manual fallback in the frontend
+        console.error('Scrape Error:', e.message);
+        // Even if it fails, we return success:false so the frontend manual fallback triggers
         return res.status(200).json({ 
             success: false, 
-            message: "Marketplace responded too slowly.",
-            title: "Manual Entry Required"
+            error: e.message,
+            title: "Listing Detected" 
         });
     }
 }
