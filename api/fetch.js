@@ -2,53 +2,51 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 export default async function handler(req, res) {
+    // 1. Set CORS headers so your website can talk to this API
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     if (req.method === 'OPTIONS') return res.status(200).end();
-    
-    const { url } = req.query;
-    if (!url) return res.status(400).json({ error: 'No URL' });
 
-    // Use a pool of high-end User Agents
-    const userAgents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-    ];
-    const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'No URL provided' });
+
+    // 2. Your ScrapingBee Credentials
+    const SB_KEY = "HEPV5Z6E0VC66R4GI78UN8AOH78ZJ9O82B7DUUOJ49ALZT5CT8NVUU17FAZCZ8H3TVPBUL8W5YLT57WS";
 
     try {
-        const response = await axios.get(url, { 
-            timeout: 9000,
-            headers: { 
-                'User-Agent': randomUA,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
-                'Referer': 'https://www.google.com/', // Changed to Google to look like search traffic
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'cross-site',
-                'Sec-Fetch-Dest': 'document',
-                'Upgrade-Insecure-Requests': '1'
-            } 
-        });
+        // 3. Routing the request through ScrapingBee's "Stealth" Browser
+        // render_js=true: Loads the page like a human (beats Cloudflare)
+        // premium_proxy=true: Uses SA residential IPs (beats IP blocks)
+        const scraperUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SB_KEY}&url=${encodeURIComponent(url)}&render_js=true&premium_proxy=true&country_code=za`;
+
+        const response = await axios.get(scraperUrl, { timeout: 20000 }); // Increased timeout for JS rendering
 
         const $ = cheerio.load(response.data);
-        const title = $('meta[property="og:title"]').attr('content') || $('h1').first().text().trim();
-        const image = $('meta[property="og:image"]').attr('content') || "";
 
-        if (!title || title === "Item Found") throw new Error("Cloudflare Block Detected");
+        // 4. Extracting Metadata
+        const title = $('meta[property="og:title"]').attr('content') || 
+                      $('h1').first().text().trim() || 
+                      "Item Found";
+                      
+        const image = $('meta[property="og:image"]').attr('content') || 
+                      $('meta[name="twitter:image"]').attr('content') || 
+                      "";
 
-        return res.status(200).json({ success: true, title, image });
+        return res.status(200).json({ 
+            success: true, 
+            title: title, 
+            image: image 
+        });
 
     } catch (e) {
-        // Log the 403 specifically to your Vercel logs
-        console.log(`[403 BLOCK] JunkMail is blocking Vercel. Falling back to Manual mode.`);
+        console.error('ScrapingBee Error:', e.message);
         
-        // CRITICAL: We return success: false so your frontend triggers the "Type Name" box
+        // 5. Fallback: If ScrapingBee hits an issue, we still tell the frontend 
+        // to show the manual input box so the user isn't stuck.
         return res.status(200).json({ 
             success: false, 
-            status: 403,
-            title: "Manual Entry Required" 
+            message: "Direct fetch failed, switching to manual mode.",
+            title: "Listing Detected"
         });
     }
 }
